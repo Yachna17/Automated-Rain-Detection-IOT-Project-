@@ -1,0 +1,135 @@
+#define BLYNK_TEMPLATE_ID "TMPL37rQAjYzW"
+#define BLYNK_TEMPLATE_NAME "RAIN DETECT SYSTEM"
+#define BLYNK_AUTH_TOKEN "Bdj5ZQ0IlfSx3fstI2nPgu8SRbvdHhBr"
+
+#define BLYNK_PRINT Serial
+
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <Servo.h>
+
+// WiFi
+char ssid[] = "hotspot_name";
+char pass[] = "pass";
+
+Servo myServo;
+
+#define RAIN_SENSOR D2
+#define SERVO_PIN   D4
+#define BUZZER      D5
+#define RED_LED     D6
+#define GREEN_LED   D7
+
+bool isRaining = false;
+bool manualMode = false;
+
+int servoPos = 0;
+
+//  Manual Control (V0)
+BLYNK_WRITE(V0) {
+  if (manualMode) {
+    int value = param.asInt();
+
+    if (value == 1) {
+      servoPos = 120;
+      myServo.write(servoPos);
+    } else {
+      servoPos = 0;
+      myServo.write(servoPos);
+    }
+
+    Blynk.virtualWrite(V3, servoPos);
+  }
+}
+
+//  Auto / Manual Switch (V2)
+BLYNK_WRITE(V2) {
+  manualMode = param.asInt();
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(RAIN_SENSOR, INPUT);
+  pinMode(BUZZER, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
+
+  myServo.attach(SERVO_PIN);
+  myServo.write(0);
+
+  // Default LED state
+  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(RED_LED, LOW);
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);
+}
+
+void loop() {
+  Blynk.run();
+
+  //  Skip auto if manual mode ON
+  if (manualMode) return;
+
+  int rainStatus = digitalRead(RAIN_SENSOR);
+
+  //  Rain detected
+  if (rainStatus == LOW && isRaining == false) {
+    isRaining = true;
+
+    Serial.println("Rain Detected");
+
+    Blynk.virtualWrite(V1, 1);
+
+    //  LED ON
+    digitalWrite(RED_LED, HIGH);
+    digitalWrite(GREEN_LED, LOW);
+
+    //  Notification
+    Blynk.logEvent("rain_alert", "Rain Started!");
+
+    //  Beep 5 times
+    for (int i = 0; i < 5; i++) {
+      digitalWrite(BUZZER, HIGH);
+      delay(150);
+      digitalWrite(BUZZER, LOW);
+      delay(150);
+    }
+
+    //  Smooth servo movement
+    for (int pos = 0; pos <= 120; pos++) {
+      myServo.write(pos);
+      servoPos = pos;
+      Blynk.virtualWrite(V3, servoPos);
+      delay(10);
+    }
+  }
+
+  //  Rain stopped
+  else if (rainStatus == HIGH && isRaining == true) {
+
+    delay(2000);  // confirm dryness
+
+    if (digitalRead(RAIN_SENSOR) == HIGH) {
+      isRaining = false;
+
+      Serial.println("No Rain");
+
+      Blynk.virtualWrite(V1, 0);
+
+      //  LED ON
+      digitalWrite(RED_LED, LOW);
+      digitalWrite(GREEN_LED, HIGH);
+
+      //  Return servo
+      for (int pos = 120; pos >= 0; pos--) {
+        myServo.write(pos);
+        servoPos = pos;
+        Blynk.virtualWrite(V3, servoPos);
+        delay(10);
+      }
+    }
+  }
+}
